@@ -10,6 +10,7 @@ using Android.Runtime;
 using Android.Views;
 using Android.Widget;
 using Android.Bluetooth;
+using Java.Util;
 
 namespace Bluetooth.Droid.Activities.Bluetooth
 {
@@ -18,6 +19,8 @@ namespace Bluetooth.Droid.Activities.Bluetooth
     {
         string macAddress = string.Empty;
         private static ArrayAdapter<string> newDevicesArrayAdapter;
+        private static ArrayAdapter<string> pairedDevicesArrayAdapter;
+        private static List<BluetoothDevice> newlyDiscoveredBTDevices = new List<BluetoothDevice>();
         private Receiver receiver;
         BluetoothAdapter mBluetoothAdapter;
         protected override void OnCreate(Bundle savedInstanceState)
@@ -36,6 +39,12 @@ namespace Bluetooth.Droid.Activities.Bluetooth
             filter = new IntentFilter(BluetoothAdapter.ActionDiscoveryFinished);
 
             RegisterReceiver(receiver, filter);
+
+            pairedDevicesArrayAdapter = new ArrayAdapter<string>(this, Resource.Layout.device_name);
+            var pairedDevicesListView = FindViewById<ListView>(Resource.Id.paired_devices);
+            pairedDevicesListView.Adapter = pairedDevicesArrayAdapter;
+            pairedDevicesListView.ItemClick += PairedDevicesListView_ItemClick;
+
             newDevicesArrayAdapter = new ArrayAdapter<string>(this, Resource.Layout.device_name);
 
             var newDevicesListView = FindViewById<ListView>(Resource.Id.new_devices);
@@ -65,6 +74,30 @@ namespace Bluetooth.Droid.Activities.Bluetooth
 
         }
 
+        private void PairedDevicesListView_ItemClick(object sender, AdapterView.ItemClickEventArgs e)
+        {
+            mBluetoothAdapter.CancelDiscovery();
+
+            // Get the device MAC address, which is the last 17 chars in the View
+            var info = (e.View as TextView).Text.ToString();
+            var address = info.Substring(info.Length - 17);
+
+            string[] lines = info.ToString().Split(new string[] { "\n" }, StringSplitOptions.None);
+            var device_Name = lines[0];
+
+            BluetoothDevice device = mBluetoothAdapter.BondedDevices.Where(x => x.Name == device_Name).SingleOrDefault();
+            try
+            {
+                BluetoothSocket btSocket = device.CreateRfcommSocketToServiceRecord(UUID.FromString("00001101-0000-1000-8000-00805F9B34FB"));
+                btSocket.Connect();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("ex: " + ex.Message);
+            }
+
+        }
+
         void DeviceDiscovery(BluetoothAdapter mBluetoothAdapter)
         {
             ICollection<BluetoothDevice> pairedDevices = mBluetoothAdapter.BondedDevices;
@@ -80,6 +113,10 @@ namespace Bluetooth.Droid.Activities.Bluetooth
 
         private void DoDiscovery()
         {
+            foreach (var device in mBluetoothAdapter.BondedDevices)
+            {
+                pairedDevicesArrayAdapter.Add(device.Name + "\n" + device.Address);
+            }
             // Indicate scanning in the title
             SetProgressBarIndeterminateVisibility(true);
             SetTitle(Resource.String.scanning);
@@ -110,6 +147,18 @@ namespace Bluetooth.Droid.Activities.Bluetooth
             var device_Name = lines[0];
 
             Toast.MakeText(this, device_Name, ToastLength.Long).Show();
+
+
+            BluetoothDevice btDevice = newlyDiscoveredBTDevices.Where(x => x.Name == device_Name).SingleOrDefault();
+            try
+            {
+                BluetoothSocket btSocket = btDevice.CreateRfcommSocketToServiceRecord(UUID.FromString("00001101-0000-1000-8000-00805F9B34FB"));
+                btSocket.Connect();
+            }
+            catch(Exception ex)
+            {
+                Console.WriteLine("ex: " + ex.Message);
+            }
 
             //Intent intent = new Intent(this, typeof(BluetoothChat));
             //intent.PutExtra(BluetoothChat.DEVICE_NAME, device_Name);
@@ -143,6 +192,7 @@ namespace Bluetooth.Droid.Activities.Bluetooth
                     // If it's already paired, skip it, because it's been listed already
                     if (device.BondState != Bond.Bonded)
                     {
+                        newlyDiscoveredBTDevices.Add(device);
                         newDevicesArrayAdapter.Add(device.Name + "\n" + device.Address);
                     }
                     // When discovery is finished, change the Activity title
